@@ -1,6 +1,5 @@
 # ============================================================
 # 3-WIND-INSTRUMENT COMPARISON SCRIPT
-# Tier 1 and Tier 2 diagnostics
 #
 # Instruments:
 #   1. THIES
@@ -496,6 +495,114 @@ def plot_pairwise_direction_difference(df):
 
 
 
+def calculate_data_availability(df):
+    """
+    Calculate data availability for each instrument and variable.
+
+    Returns:
+        DataFrame with availability statistics for each sensor and measurement type.
+    """
+    # Calculate time span
+    first_timestamp = df["timestamp"].min()
+    last_timestamp = df["timestamp"].max()
+
+    time_span_minutes = (last_timestamp - first_timestamp).total_seconds() / 60
+    expected_readings = int(time_span_minutes) + 1  # +1 to include both endpoints
+
+    availability_data = []
+
+    # Define all sensor-variable combinations
+    sensor_vars = [
+        ("THIES", "avg"),
+        ("THIES", "max"),
+        ("THIES", "direction"),
+        ("Ventus", "avg"),
+        ("Ventus", "max"),
+        ("Ventus", "direction"),
+        ("A100&W200", "avg"),
+        ("A100&W200", "max"),
+        ("A100&W200", "direction"),
+    ]
+
+    for sensor, variable in sensor_vars:
+        col_name = f"{sensor}_{variable}"
+        actual_readings = df[col_name].notna().sum()
+        availability_percent = (actual_readings / expected_readings) * 100
+
+        availability_data.append({
+            "sensor": sensor,
+            "variable": variable,
+            "expected_readings": expected_readings,
+            "actual_readings": actual_readings,
+            "missing_readings": expected_readings - actual_readings,
+            "availability_percent": availability_percent
+        })
+
+    availability_df = pd.DataFrame(availability_data)
+
+    return availability_df, first_timestamp, last_timestamp, expected_readings
+
+
+def plot_data_availability(availability_df, first_timestamp, last_timestamp, expected_readings):
+    """
+    Plot data availability for each instrument and variable.
+    """
+    # Create figure with two subplots
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+
+    # Prepare data for grouped bar chart
+    sensors = ["THIES", "Ventus", "A100&W200"]
+    variables = ["avg", "max", "direction"]
+
+    x = np.arange(len(sensors))
+    width = 0.25
+
+    # Plot 1: Availability percentage
+    for i, var in enumerate(variables):
+        var_data = availability_df[availability_df["variable"] == var]
+        percentages = var_data["availability_percent"].values
+        ax1.bar(x + i * width, percentages, width, label=var.capitalize())
+
+    ax1.set_xlabel("Sensor")
+    ax1.set_ylabel("Data Availability (%)")
+    ax1.set_title("Data Availability by Sensor and Variable")
+    ax1.set_xticks(x + width)
+    ax1.set_xticklabels(sensors)
+    ax1.set_ylim([0, 105])
+    ax1.axhline(100, color='black', linestyle='--', linewidth=0.8, alpha=0.5)
+    ax1.legend()
+    ax1.grid(axis='y', alpha=0.3)
+
+    # Plot 2: Actual vs Expected readings
+    for i, var in enumerate(variables):
+        var_data = availability_df[availability_df["variable"] == var]
+        actual = var_data["actual_readings"].values
+        ax2.bar(x + i * width, actual, width, label=var.capitalize())
+
+    ax2.axhline(expected_readings, color='red', linestyle='--', linewidth=1.5,
+                label=f'Expected ({expected_readings:,})')
+    ax2.set_xlabel("Sensor")
+    ax2.set_ylabel("Number of Readings")
+    ax2.set_title("Actual vs Expected Readings")
+    ax2.set_xticks(x + width)
+    ax2.set_xticklabels(sensors)
+    ax2.legend()
+    ax2.grid(axis='y', alpha=0.3)
+
+    # Format y-axis with comma separators
+    ax2.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{int(x):,}'))
+
+    # Add timeframe text
+    time_span_days = (last_timestamp - first_timestamp).total_seconds() / 86400
+    fig.suptitle(f'Data Availability Analysis\n'
+                 f'Time Period: {first_timestamp.strftime("%Y-%m-%d %H:%M")} to '
+                 f'{last_timestamp.strftime("%Y-%m-%d %H:%M")} '
+                 f'({time_span_days:.1f} days)',
+                 fontsize=12, y=1.02)
+
+    save_plot("data_availability_summary.png")
+
+
 def calculate_summary_statistics(df):
     """
     Create simple CSV summary statistics for each pair and variable.
@@ -710,168 +817,150 @@ for variable in ["avg", "max"]:
         )
 
 
+
 # ============================================================
-# TIER 1 PLOTS
+# DATA AVAILABILITY ANALYSIS
+# ============================================================
+
+print("\nCalculating data availability...")
+availability_df, first_ts, last_ts, expected_count = calculate_data_availability(df)
+
+# Display availability summary
+print("\nData Availability Summary:")
+print("=" * 80)
+print(f"Time Period: {first_ts.strftime('%Y-%m-%d %H:%M')} to {last_ts.strftime('%Y-%m-%d %H:%M')}")
+print(f"Expected readings per instrument: {expected_count:,}")
+print(f"\n{'Sensor':<15} {'Variable':<12} {'Actual':<12} {'Missing':<12} {'Availability':<12}")
+print("-" * 80)
+for _, row in availability_df.iterrows():
+    print(f"{row['sensor']:<15} {row['variable']:<12} {int(row['actual_readings']):<12,} "
+          f"{int(row['missing_readings']):<12,} {row['availability_percent']:<11.2f}%")
+print("=" * 80)
+
+# Plot data availability
+plot_data_availability(availability_df, first_ts, last_ts, expected_count)
+
+# Save availability data to CSV
+availability_path = os.path.join(output_folder, "data_availability.csv")
+availability_df.to_csv(availability_path, index=False)
+
+
+# ============================================================
 # Three-sensor diagnostics
 # ============================================================
 
 # ------------------------------------------------------------
-# 1. Time-series overlays
+# 1. Sensor minus consensus vs time
 # ------------------------------------------------------------
-
-plot_time_series(
-    df,
-    ["THIES_avg", "Ventus_avg", "A100&W200_avg"],
-    "Average wind speed time series",
-    "Average wind speed, m/s",
-    "tier1_avg_wind_speed_time_series.png"
-)
-
-plot_time_series(
-    df,
-    ["THIES_max", "Ventus_max", "A100&W200_max"],
-    "Maximum wind speed time series",
-    "Maximum wind speed, m/s",
-    "tier1_max_wind_speed_time_series.png"
-)
-
-# ------------------------------------------------------------
-# 2. Sensor minus consensus vs time
-# ------------------------------------------------------------
-
-plot_sensor_minus_consensus(
-    df,
-    "avg",
-    "Sensor minus consensus average wind speed, m/s",
-    "tier1_avg_sensor_minus_consensus_time.png"
-)
 
 plot_sensor_minus_consensus(
     df,
     "max",
     "Sensor minus consensus maximum wind speed, m/s",
-    "tier1_max_sensor_minus_consensus_time.png"
+    "max_sensor_minus_consensus_time.png"
 )
 
 # ------------------------------------------------------------
-# 3. Sensor minus consensus vs wind speed
+# 2. Sensor minus consensus vs wind speed
 # ------------------------------------------------------------
 
 plot_residual_vs_speed(
     df,
     "avg",
     "Sensor minus consensus average wind speed, m/s",
-    "tier1_avg_sensor_minus_consensus_vs_speed.png"
+    "avg_sensor_minus_consensus_vs_speed.png"
 )
 
 plot_residual_vs_speed(
     df,
     "max",
     "Sensor minus consensus maximum wind speed, m/s",
-    "tier1_max_sensor_minus_consensus_vs_speed.png"
+    "max_sensor_minus_consensus_vs_speed.png"
 )
 
 # ------------------------------------------------------------
-# 4. Three-sensor spread
-# ------------------------------------------------------------
-
-plot_three_sensor_spread(
-    df,
-    "avg",
-    "Average wind speed spread, m/s",
-    "tier1_avg_three_sensor_spread_time.png"
-)
-
-plot_three_sensor_spread(
-    df,
-    "max",
-    "Maximum wind speed spread, m/s",
-    "tier1_max_three_sensor_spread_time.png"
-)
-
-# ------------------------------------------------------------
-# 5. Three-sensor spread vs wind speed
+# 3. Three-sensor spread vs wind speed
 # ------------------------------------------------------------
 
 plot_spread_vs_speed(
     df,
     "avg",
     "Average wind speed spread, m/s",
-    "tier1_avg_spread_vs_speed.png"
+    "avg_spread_vs_speed.png"
 )
 
 plot_spread_vs_speed(
     df,
     "max",
     "Maximum wind speed spread, m/s",
-    "tier1_max_spread_vs_speed.png"
+    "max_spread_vs_speed.png"
 )
 
 # ------------------------------------------------------------
-# 6. Three-sensor spread by direction sector
+# 4. Three-sensor spread by direction sector
 # ------------------------------------------------------------
 
 plot_spread_by_direction_sector(
     df,
     "avg",
     "Average wind speed spread, m/s",
-    "tier1_avg_spread_by_direction_sector.png"
+    "avg_spread_by_direction_sector.png"
 )
 
 plot_spread_by_direction_sector(
     df,
     "max",
     "Maximum wind speed spread, m/s",
-    "tier1_max_spread_by_direction_sector.png"
+    "max_spread_by_direction_sector.png"
 )
 
 plot_spread_by_direction_sector(
     df,
     "direction",
     "Direction spread, degrees",
-    "tier1_direction_spread_by_direction_sector.png"
+    "direction_spread_by_direction_sector.png"
 )
 
-
-# 7. Rank frequency plots
+#-------------------------------------------------------------
+# 5. Rank frequency plots
 # ------------------------------------------------------------
 
 plot_rank_summary(
     df,
     "avg",
-    "tier1_avg_rank_frequency.png"
+    "avg_rank_frequency.png"
 )
 
 plot_rank_summary(
     df,
     "max",
-    "tier1_max_rank_frequency.png"
+    "max_rank_frequency.png"
 )
 
-
-# 8. Odd-one-out by direction sector
+#-------------------------------------------------------------
+# 6. Odd-one-out by direction sector
 # ------------------------------------------------------------
 
 plot_odd_one_out_by_direction(
     df,
     "avg",
-    "tier1_avg_odd_one_out_by_direction.png"
+    "avg_odd_one_out_by_direction.png"
 )
 
 plot_odd_one_out_by_direction(
     df,
     "max",
-    "tier1_max_odd_one_out_by_direction.png"
+    "max_odd_one_out_by_direction.png"
 )
 
 plot_odd_one_out_by_direction(
     df,
     "direction",
-    "tier1_direction_odd_one_out_by_direction.png"
+    "direction_odd_one_out_by_direction.png"
 )
 
-
-# 9. Rolling bias and rolling RMSE
+#-------------------------------------------------------------
+# 7. Rolling bias and rolling RMSE
 # ------------------------------------------------------------
 
 for variable in ["avg", "max"]:
@@ -890,7 +979,7 @@ for variable in ["avg", "max"]:
     plt.xlabel("Time")
     plt.ylabel("Rolling bias, m/s")
     plt.legend()
-    save_plot(f"tier1_{variable}_rolling_bias.png")
+    save_plot(f"{variable}_rolling_bias.png")
 
     plt.figure()
 
@@ -906,11 +995,10 @@ for variable in ["avg", "max"]:
     plt.xlabel("Time")
     plt.ylabel("Rolling RMSE, m/s")
     plt.legend()
-    save_plot(f"tier1_{variable}_rolling_rmse.png")
+    save_plot(f"{variable}_rolling_rmse.png")
 
 
 # ============================================================
-# TIER 2 PLOTS
 # Pairwise diagnostics
 # ============================================================
 
@@ -922,14 +1010,14 @@ plot_pairwise_scatter(
     df,
     "avg",
     "average wind speed, m/s",
-    "tier2_pairwise_scatter_avg"
+    "pairwise_scatter_avg"
 )
 
 plot_pairwise_scatter(
     df,
     "max",
     "maximum wind speed, m/s",
-    "tier2_pairwise_scatter_max"
+    "pairwise_scatter_max"
 )
 
 
@@ -941,14 +1029,14 @@ plot_pairwise_bland_altman(
     df,
     "avg",
     "average wind speed, m/s",
-    "tier2_bland_altman_avg"
+    "bland_altman_avg"
 )
 
 plot_pairwise_bland_altman(
     df,
     "max",
     "maximum wind speed, m/s",
-    "tier2_bland_altman_max"
+    "bland_altman_max"
 )
 
 
@@ -960,14 +1048,14 @@ plot_pairwise_difference_by_direction(
     df,
     "avg",
     "Average wind speed difference, m/s",
-    "tier2_avg_pairwise_difference"
+    "avg_pairwise_difference"
 )
 
 plot_pairwise_difference_by_direction(
     df,
     "max",
     "Maximum wind speed difference, m/s",
-    "tier2_max_pairwise_difference"
+    "max_pairwise_difference"
 )
 
 
@@ -1000,5 +1088,6 @@ df.to_csv(processed_data_path, index=False)
 print("Analysis complete.")
 print(f"Plots and output files saved in: {output_folder}")
 print("Key output files:")
+print("  - data_availability.csv")
 print("  - summary_statistics.csv")
 print("  - processed_wind_comparison_data.csv")
