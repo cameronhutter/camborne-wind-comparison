@@ -107,11 +107,8 @@ def circular_spread_deg(angles_deg):
     """
     mean_dir = circular_mean_deg(angles_deg)
 
-    diffs = []
-    for col in angles_deg.columns:
-        diffs.append(np.abs(circular_difference_deg(angles_deg[col], mean_dir)))
-
-    diffs = pd.concat(diffs, axis=1)
+    # Vectorized calculation of differences
+    diffs = angles_deg.apply(lambda col: np.abs(circular_difference_deg(col, mean_dir)))
 
     return diffs.max(axis=1)
 
@@ -238,12 +235,17 @@ def plot_spread_by_direction_sector(df, variable, ylabel, filename):
     """
     Boxplot of three-sensor spread by wind direction sector.
     """
-    sector_values = sorted(df["direction_sector"].dropna().unique())
-    data_to_plot = []
+    # Filter valid data once
+    valid_df = df[["direction_sector", f"{variable}_spread"]].dropna()
 
-    for sector in sector_values:
-        sector_df = df[df["direction_sector"] == sector]
-        data_to_plot.append(sector_df[f"{variable}_spread"].dropna())
+    if valid_df.empty:
+        return
+
+    sector_values = sorted(valid_df["direction_sector"].unique())
+
+    # Use groupby for efficient filtering
+    grouped = valid_df.groupby("direction_sector")[f"{variable}_spread"]
+    data_to_plot = [grouped.get_group(sector).values for sector in sector_values]
 
     plt.figure(figsize=(12, 6))
     plt.boxplot(data_to_plot, labels=[int(s) for s in sector_values], showfliers=False)
@@ -260,21 +262,19 @@ def plot_rank_summary(df, variable, filename):
     sensors = ["THIES", "Ventus", "A100&W200"]
     cols = [f"{sensor}_{variable}" for sensor in sensors]
 
-    rank_counts = pd.DataFrame(index=sensors, columns=["Lowest", "Middle", "Highest"])
-    rank_counts[:] = 0
-
     valid_df = df[cols].dropna()
 
-    for _, row in valid_df.iterrows():
-        sorted_sensors = row.sort_values().index
+    if valid_df.empty:
+        return
 
-        lowest_sensor = sorted_sensors[0].replace(f"_{variable}", "")
-        middle_sensor = sorted_sensors[1].replace(f"_{variable}", "")
-        highest_sensor = sorted_sensors[2].replace(f"_{variable}", "")
+    # Vectorized ranking: argsort gives indices, argsort again gives ranks
+    ranks = valid_df.values.argsort(axis=1).argsort(axis=1)
 
-        rank_counts.loc[lowest_sensor, "Lowest"] += 1
-        rank_counts.loc[middle_sensor, "Middle"] += 1
-        rank_counts.loc[highest_sensor, "Highest"] += 1
+    # Count occurrences of each rank for each sensor
+    rank_counts = pd.DataFrame(index=sensors, columns=["Lowest", "Middle", "Highest"], dtype=int)
+    rank_counts["Lowest"] = (ranks == 0).sum(axis=0)
+    rank_counts["Middle"] = (ranks == 1).sum(axis=0)
+    rank_counts["Highest"] = (ranks == 2).sum(axis=0)
 
     rank_percent = rank_counts.div(rank_counts.sum(axis=1), axis=0) * 100
 
@@ -295,31 +295,29 @@ def plot_odd_one_out_by_direction(df, variable, filename):
     """
     sensors = ["THIES", "Ventus", "A100&W200"]
 
-    rows = []
+    # Filter out rows with missing direction_sector
+    valid_mask = df["direction_sector"].notna()
 
-    for _, row in df.iterrows():
-        sector = row["direction_sector"]
+    # Create DataFrame with absolute deviations for each sensor
+    deviation_cols = [f"{sensor}_{variable}_minus_consensus" for sensor in sensors]
+    deviations = df.loc[valid_mask, deviation_cols].abs()
 
-        if pd.isna(sector):
-            continue
+    # Check if all deviation columns are present
+    if deviations.isna().all().all():
+        return
 
-        deviations = {}
+    # Find which sensor has max deviation for each row (vectorized)
+    odd_sensor_indices = deviations.values.argmax(axis=1)
+    odd_sensors = [sensors[i] for i in odd_sensor_indices]
 
-        for sensor in sensors:
-            residual_col = f"{sensor}_{variable}_minus_consensus"
-            deviations[sensor] = abs(row[residual_col])
+    # Create DataFrame with direction_sector and odd_sensor
+    odd_df = pd.DataFrame({
+        "direction_sector": df.loc[valid_mask, "direction_sector"].values,
+        "odd_sensor": odd_sensors
+    })
 
-        if any(pd.isna(list(deviations.values()))):
-            continue
-
-        odd_sensor = max(deviations, key=deviations.get)
-
-        rows.append({
-            "direction_sector": sector,
-            "odd_sensor": odd_sensor
-        })
-
-    odd_df = pd.DataFrame(rows)
+    # Remove rows where all deviations were NaN
+    odd_df = odd_df[deviations.notna().any(axis=1).values]
 
     if odd_df.empty:
         return
@@ -420,16 +418,23 @@ def plot_pairwise_difference_by_direction(df, variable, ylabel, filename_prefix)
     """
     Pairwise difference boxplots by wind direction sector.
     """
-    sector_values = sorted(df["direction_sector"].dropna().unique())
-
     for sensor_a, sensor_b in pairwise_pairs():
         diff = df[f"{sensor_a}_{variable}"] - df[f"{sensor_b}_{variable}"]
 
-        data_to_plot = []
+        # Create temporary DataFrame with direction_sector and diff
+        temp_df = pd.DataFrame({
+            "direction_sector": df["direction_sector"],
+            "diff": diff
+        }).dropna()
 
-        for sector in sector_values:
-            sector_data = diff[df["direction_sector"] == sector].dropna()
-            data_to_plot.append(sector_data)
+        if temp_df.empty:
+            continue
+
+        sector_values = sorted(temp_df["direction_sector"].unique())
+
+        # Use groupby for efficient filtering
+        grouped = temp_df.groupby("direction_sector")["diff"]
+        data_to_plot = [grouped.get_group(sector).values for sector in sector_values]
 
         plt.figure(figsize=(12, 6))
         plt.boxplot(data_to_plot, labels=[int(s) for s in sector_values], showfliers=False)
