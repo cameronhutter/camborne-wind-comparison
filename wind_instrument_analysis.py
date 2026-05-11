@@ -766,12 +766,16 @@ plot_residual_vs_speed(
     "tier1_max_sensor_minus_consensus_vs_speed.png"
 )
 
-
-
 # ------------------------------------------------------------
-# 5. Three-sensor spread
+# 4. Three-sensor spread
 # ------------------------------------------------------------
 
+plot_three_sensor_spread(
+    df,
+    "avg",
+    "Average wind speed spread, m/s",
+    "tier1_avg_three_sensor_spread_time.png"
+)
 
 plot_three_sensor_spread(
     df,
@@ -781,7 +785,7 @@ plot_three_sensor_spread(
 )
 
 # ------------------------------------------------------------
-# 6. Three-sensor spread vs wind speed
+# 5. Three-sensor spread vs wind speed
 # ------------------------------------------------------------
 
 plot_spread_vs_speed(
@@ -799,7 +803,7 @@ plot_spread_vs_speed(
 )
 
 # ------------------------------------------------------------
-# 7. Three-sensor spread by direction sector
+# 6. Three-sensor spread by direction sector
 # ------------------------------------------------------------
 
 plot_spread_by_direction_sector(
@@ -824,8 +828,7 @@ plot_spread_by_direction_sector(
 )
 
 
-# ------------------------------------------------------------
-# 8. Rank frequency plots
+# 7. Rank frequency plots
 # ------------------------------------------------------------
 
 plot_rank_summary(
@@ -841,8 +844,7 @@ plot_rank_summary(
 )
 
 
-# ------------------------------------------------------------
-# 9. Odd-one-out by direction sector
+# 8. Odd-one-out by direction sector
 # ------------------------------------------------------------
 
 plot_odd_one_out_by_direction(
@@ -864,8 +866,7 @@ plot_odd_one_out_by_direction(
 )
 
 
-# ------------------------------------------------------------
-# 10. Rolling bias and rolling RMSE
+# 9. Rolling bias and rolling RMSE
 # ------------------------------------------------------------
 
 for variable in ["avg", "max"]:
@@ -966,7 +967,7 @@ plot_pairwise_difference_by_direction(
 
 
 # ------------------------------------------------------------
-# 5. Pairwise circular direction difference plots
+# 4. Pairwise circular direction difference plots
 # ------------------------------------------------------------
 
 plot_pairwise_direction_difference(df)
