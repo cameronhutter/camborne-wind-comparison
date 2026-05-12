@@ -26,7 +26,7 @@ output_folder = "/home/users/cameron.hutter/VS Code/Camborne Wind Comparison/ana
 
 # Wind-speed threshold for direction analysis.
 # Direction is often noisy at very low wind speed.
-direction_speed_threshold = 1.0  # m/s
+direction_speed_threshold = 5  # m/s
 
 # Rolling window size for rolling bias/RMSE plots.
 # For minutely data, 60 = 1 hour.
@@ -342,7 +342,7 @@ def plot_odd_one_out_by_direction(df, variable, filename):
 
 def plot_pairwise_scatter(df, variable, ylabel, filename_prefix):
     """
-    Pairwise scatter plots with 1:1 line.
+    Pairwise scatter plots with 1:1 line and line of best fit.
     """
     for sensor_x, sensor_y in pairwise_pairs():
         x_col = f"{sensor_x}_{variable}"
@@ -356,16 +356,45 @@ def plot_pairwise_scatter(df, variable, ylabel, filename_prefix):
         if valid.sum() == 0:
             continue
 
-        min_value = min(x[valid].min(), y[valid].min())
-        max_value = max(x[valid].max(), y[valid].max())
+        x_valid = x[valid].values
+        y_valid = y[valid].values
+
+        min_value = min(x_valid.min(), y_valid.min())
+        max_value = max(x_valid.max(), y_valid.max())
+
+        # Calculate line of best fit
+        slope, intercept = np.polyfit(x_valid, y_valid, 1)
+        fit_line = slope * np.array([min_value, max_value]) + intercept
+
+        # Calculate average percentage difference between 1:1 and line of best fit
+        # Sample points along the range for comparison
+        sample_points = np.linspace(min_value, max_value, 100)
+        one_to_one_values = sample_points
+        fit_values = slope * sample_points + intercept
+
+        # Calculate percentage difference: |(fit - 1:1) / 1:1| * 100
+        # Avoid division by zero by only considering points where 1:1 line is not zero
+        nonzero_mask = np.abs(one_to_one_values) > 0.01
+        if nonzero_mask.sum() > 0:
+            pct_diff = np.abs((fit_values[nonzero_mask] - one_to_one_values[nonzero_mask])
+                             / one_to_one_values[nonzero_mask]) * 100
+            avg_pct_diff = np.mean(pct_diff)
+        else:
+            avg_pct_diff = 0.0
 
         plt.figure()
-        plt.scatter(x[valid], y[valid], s=5, alpha=0.35)
-        plt.plot([min_value, max_value], [min_value, max_value], color="black", linewidth=1)
+        plt.scatter(x_valid, y_valid, s=5, alpha=0.35, label='Data')
+        plt.plot([min_value, max_value], [min_value, max_value],
+                color="black", linewidth=1.5, label="1:1 line")
+        plt.plot([min_value, max_value], fit_line,
+                color="red", linewidth=1.5,
+                label=f"Best fit: y={slope:.3f}x+{intercept:.3f}")
 
-        plt.title(f"{sensor_y} vs {sensor_x}: {variable.upper()}")
+        plt.title(f"{sensor_y} vs {sensor_x}: {variable.upper()}\n"
+                 f"Avg % difference from 1:1: {avg_pct_diff:.2f}%")
         plt.xlabel(f"{sensor_x} {ylabel}")
         plt.ylabel(f"{sensor_y} {ylabel}")
+        plt.legend(loc='best')
 
         safe_name = f"{filename_prefix}_{sensor_y}_vs_{sensor_x}.png"
         safe_name = safe_name.replace("&", "and").replace(" ", "_")
@@ -471,7 +500,7 @@ def plot_pairwise_direction_difference(df):
         plt.figure()
         plt.scatter(df.loc[valid, "timestamp"], diff[valid], s=5, alpha=0.35)
         plt.axhline(0, color="black", linewidth=1)
-        plt.title(f"Direction difference: {sensor_a} minus {sensor_b}")
+        plt.title(f"Direction difference: {sensor_a} minus {sensor_b} ({direction_speed_threshold}m/s cut off)")
         plt.xlabel("Time")
         plt.ylabel("Direction difference, degrees")
         save_plot(
@@ -484,7 +513,7 @@ def plot_pairwise_direction_difference(df):
         plt.figure()
         plt.scatter(df.loc[valid, "avg_consensus"], diff[valid], s=5, alpha=0.35)
         plt.axhline(0, color="black", linewidth=1)
-        plt.title(f"Direction difference vs wind speed: {sensor_a} minus {sensor_b}")
+        plt.title(f"Direction difference vs wind speed: {sensor_a} minus {sensor_b} ({direction_speed_threshold}m/s cut off)")
         plt.xlabel("Consensus average wind speed, m/s")
         plt.ylabel("Direction difference, degrees")
         save_plot(
